@@ -12,6 +12,7 @@ class ModelConfig(pydra.Config):
         self.n_heads = 4            # transformer-only
         self.pos_encoding = "sinusoidal"  # learned | sinusoidal | rope | none (transformer-only)
         self.dropout = 0.0
+        self.gd_init = False          # linear_rnn only: init weights to implement exact GD
 
 
 class TaskConfig(pydra.Config):

@@ -40,6 +40,8 @@ FAMILY_STYLE = {
     "transformer_none":        {"color": "tab:cyan",   "ls": "-"},
     "lstm":                    {"color": "tab:red",    "ls": "--"},
     "gru":                     {"color": "tab:orange", "ls": "-."},
+    "linear_rnn":              {"color": "tab:brown",  "ls": ":"},
+    "linear_rnn_proj":         {"color": "tab:pink",   "ls": ":"},
 }
 
 
