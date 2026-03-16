@@ -40,11 +40,6 @@ class ModelConfig(pydra.Config):
         self.gd_init = False
         self.use_projections = False
 
-        # Legacy fields (kept for backward compat with old linear_rnn configs)
-        self.update_rule = "hebbian"
-        self.memory_type = "matrix"
-        self.memory_d_hidden = 64
-
         # MIRAS-specific (nested)
         self.memory = MemoryStructureConfig()
         self.bias = AttentionalBiasConfig()
