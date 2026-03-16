@@ -3,16 +3,82 @@
 import pydra
 
 
+class MemoryStructureConfig(pydra.Config):
+    def __init__(self):
+        super().__init__()
+        self.type = "matrix"        # matrix | mlp
+        self.d_hidden = 64          # MLP hidden dim
+
+
+class AttentionalBiasConfig(pydra.Config):
+    def __init__(self):
+        super().__init__()
+        self.type = "dot_product"   # dot_product | l2
+
+
+class RetentionGateConfig(pydra.Config):
+    def __init__(self):
+        super().__init__()
+        self.type = "none"          # none | scalar_l2
+
+
+class MemoryAlgorithmConfig(pydra.Config):
+    def __init__(self):
+        super().__init__()
+        self.type = "gd"            # gd
+
+
 class ModelConfig(pydra.Config):
     def __init__(self):
         super().__init__()
-        self.type = "transformer"   # transformer | lstm | gru
+        self.type = "transformer"   # transformer | lstm | gru | miras
         self.d_model = 128
         self.n_layers = 6
         self.n_heads = 4            # transformer-only
         self.pos_encoding = "sinusoidal"  # learned | sinusoidal | rope | none (transformer-only)
         self.dropout = 0.0
-        self.gd_init = False          # linear_rnn only: init weights to implement exact GD
+        self.gd_init = False
+        self.use_projections = False
+
+        # Legacy fields (kept for backward compat with old linear_rnn configs)
+        self.update_rule = "hebbian"
+        self.memory_type = "matrix"
+        self.memory_d_hidden = 64
+
+        # MIRAS-specific (nested)
+        self.memory = MemoryStructureConfig()
+        self.bias = AttentionalBiasConfig()
+        self.retention = RetentionGateConfig()
+        self.algorithm = MemoryAlgorithmConfig()
+
+    # Presets -- called via CLI as e.g. model.linear_attention
+    def linear_attention(self):
+        self.type = "miras"
+        self.bias.type = "dot_product"
+        self.algorithm.type = "gd"
+        self.memory.type = "matrix"
+        self.retention.type = "none"
+
+    def mamba(self):
+        self.type = "miras"
+        self.bias.type = "dot_product"
+        self.algorithm.type = "gd"
+        self.memory.type = "matrix"
+        self.retention.type = "scalar_l2"
+
+    def deltanet(self):
+        self.type = "miras"
+        self.bias.type = "l2"
+        self.algorithm.type = "gd"
+        self.memory.type = "matrix"
+        self.retention.type = "none"
+
+    def gated_deltanet(self):
+        self.type = "miras"
+        self.bias.type = "l2"
+        self.algorithm.type = "gd"
+        self.memory.type = "matrix"
+        self.retention.type = "scalar_l2"
 
 
 class TaskConfig(pydra.Config):
@@ -22,6 +88,7 @@ class TaskConfig(pydra.Config):
         self.d_input = 10
         self.d_output = 1
         self.noise_std = 0.0
+        self.degree = 2               # polynomial degree (polynomial task only)
 
 
 class TrainingConfig(pydra.Config):
@@ -43,8 +110,11 @@ def build_task(config):
     """Construct a task from a TaskConfig."""
     from src.tasks import TASK_REGISTRY
     task_cls = TASK_REGISTRY[config.type]
-    return task_cls(
+    kwargs = dict(
         d_input=config.d_input,
         d_output=config.d_output,
         noise_std=config.noise_std,
     )
+    if config.type == "polynomial":
+        kwargs["degree"] = config.degree
+    return task_cls(**kwargs)
