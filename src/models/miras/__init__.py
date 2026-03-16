@@ -81,6 +81,14 @@ def build_miras_model(config, d_in: int, d_out: int) -> MIRASModel:
     memory = _build_memory(config.memory, d_k, d_v)
     layer = MIRASLayer(memory, bias, retention, algorithm)
 
+    # Apply custom initial values for eta and alpha
+    import torch
+    eta_init = getattr(config, "eta_init", 1.0)
+    alpha_init = getattr(config, "alpha_init", 1.0)
+    with torch.no_grad():
+        layer.eta.fill_(eta_init)
+        layer.alpha.fill_(alpha_init)
+
     return MIRASModel(
         d_in=d_in,
         d_out=d_out,

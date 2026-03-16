@@ -39,6 +39,8 @@ class ModelConfig(pydra.Config):
         self.dropout = 0.0
         self.gd_init = False
         self.use_projections = False
+        self.eta_init = 1.0             # initial inner learning rate for MIRAS
+        self.alpha_init = 1.0           # initial retention strength for MIRAS
 
         # MIRAS-specific (nested)
         self.memory = MemoryStructureConfig()

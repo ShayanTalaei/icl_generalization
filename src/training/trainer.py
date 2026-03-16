@@ -35,6 +35,7 @@ class Trainer:
     def train(self):
         self.model.train()
         cfg = self.config
+        self._baseline_loss = None
 
         for step in range(1, cfg.num_steps + 1):
             self.step = step
@@ -47,6 +48,24 @@ class Trainer:
 
             loss = nn.functional.mse_loss(y_preds, ys)
             query_loss = nn.functional.mse_loss(y_preds[:, -1, :], ys[:, -1, :])
+
+            # Early stopping: NaN or Inf
+            if torch.isnan(loss) or torch.isinf(loss):
+                print(f"[step {step}] EARLY STOP: loss is {loss.item()}")
+                return {"stopped_early": True, "reason": "nan", "step": step}
+
+            # Record baseline loss for divergence detection
+            if step == min(1000, cfg.eval_every):
+                self._baseline_loss = loss.item()
+
+            # Early stopping: divergence (loss > 100x baseline)
+            if self._baseline_loss is not None and self._baseline_loss > 0:
+                if loss.item() > 100 * self._baseline_loss:
+                    print(
+                        f"[step {step}] EARLY STOP: loss {loss.item():.4f} "
+                        f"> 100x baseline {self._baseline_loss:.4f}"
+                    )
+                    return {"stopped_early": True, "reason": "diverged", "step": step}
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -69,6 +88,8 @@ class Trainer:
 
             if cfg.checkpoint_every > 0 and step % cfg.checkpoint_every == 0:
                 self.save_checkpoint()
+
+        return {"stopped_early": False, "step": cfg.num_steps}
 
     @torch.no_grad()
     def evaluate(self, num_batches: int = 10) -> float:
