@@ -41,6 +41,7 @@ class ModelConfig(pydra.Config):
         self.use_projections = False
         self.eta_init = 1.0             # initial inner learning rate for MIRAS
         self.alpha_init = 1.0           # initial retention strength for MIRAS
+        self.residual = False           # residual connections between MIRAS layers
 
         # MIRAS-specific (nested)
         self.memory = MemoryStructureConfig()

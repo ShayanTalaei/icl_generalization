@@ -68,32 +68,43 @@ def build_miras_model(config, d_in: int, d_out: int) -> MIRASModel:
             f"Available: {list(ALGORITHM_REGISTRY.keys())}"
         )
 
-    bias = BIAS_REGISTRY[config.bias.type]()
-    retention = RETENTION_REGISTRY[config.retention.type]()
-    algorithm = ALGORITHM_REGISTRY[config.algorithm.type]()
+    n_layers = getattr(config, "n_layers", 1)
+    use_projections = config.use_projections
+    residual = getattr(config, "residual", False)
+
+    # Auto-enable projections for multi-layer
+    if n_layers > 1:
+        use_projections = True
 
     # Memory dimensions depend on projection usage
-    if config.use_projections:
+    if use_projections:
         d_k = d_v = config.d_model
     else:
         d_k, d_v = d_in, d_out
 
-    memory = _build_memory(config.memory, d_k, d_v)
-    layer = MIRASLayer(memory, bias, retention, algorithm)
-
-    # Apply custom initial values for eta and alpha
+    # Create independent layers
     import torch
     eta_init = getattr(config, "eta_init", 1.0)
     alpha_init = getattr(config, "alpha_init", 1.0)
-    with torch.no_grad():
-        layer.eta.fill_(eta_init)
-        layer.alpha.fill_(alpha_init)
+
+    layers = []
+    for _ in range(n_layers):
+        bias = BIAS_REGISTRY[config.bias.type]()
+        retention = RETENTION_REGISTRY[config.retention.type]()
+        algorithm = ALGORITHM_REGISTRY[config.algorithm.type]()
+        memory = _build_memory(config.memory, d_k, d_v)
+        layer = MIRASLayer(memory, bias, retention, algorithm)
+        with torch.no_grad():
+            layer.eta.fill_(eta_init)
+            layer.alpha.fill_(alpha_init)
+        layers.append(layer)
 
     return MIRASModel(
         d_in=d_in,
         d_out=d_out,
-        layers=[layer],
-        use_projections=config.use_projections,
+        layers=layers,
+        use_projections=use_projections,
         d_model=config.d_model,
         gd_init=getattr(config, "gd_init", False),
+        residual=residual,
     )

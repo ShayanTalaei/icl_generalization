@@ -63,19 +63,69 @@ def test_model_gradient_flows():
     assert model.layers[0].eta.grad is not None
 
 
-def test_model_multi_layer_guard():
-    """Multi-layer should raise AssertionError."""
-    mem1 = MatrixMemory(5, 1)
-    mem2 = MatrixMemory(5, 1)
+def test_model_multi_layer_no_residual():
+    """Multi-layer without residual should produce correct output shape."""
+    d_in, d_out, d_model = 5, 1, 32
     layers = [
-        MIRASLayer(mem1, DotProductBias(), NoRetention(), GD()),
-        MIRASLayer(mem2, DotProductBias(), NoRetention(), GD()),
+        MIRASLayer(MatrixMemory(d_model, d_model), L2Bias(), NoRetention(), GD()),
+        MIRASLayer(MatrixMemory(d_model, d_model), L2Bias(), NoRetention(), GD()),
     ]
-    try:
-        MIRASModel(d_in=5, d_out=1, layers=layers)
-        assert False, "Should have raised"
-    except (AssertionError, NotImplementedError):
-        pass
+    model = MIRASModel(d_in=d_in, d_out=d_out, layers=layers,
+                       use_projections=True, d_model=d_model, residual=False)
+    xs = torch.randn(2, 10, d_in)
+    ys = torch.randn(2, 10, d_out)
+    preds = model(xs, ys)
+    assert preds.shape == (2, 10, d_out)
+
+
+def test_model_multi_layer_with_residual():
+    """Multi-layer with residual should produce correct output shape."""
+    d_in, d_out, d_model = 5, 1, 32
+    layers = [
+        MIRASLayer(MatrixMemory(d_model, d_model), L2Bias(), NoRetention(), GD()),
+        MIRASLayer(MatrixMemory(d_model, d_model), L2Bias(), NoRetention(), GD()),
+    ]
+    model = MIRASModel(d_in=d_in, d_out=d_out, layers=layers,
+                       use_projections=True, d_model=d_model, residual=True)
+    xs = torch.randn(2, 10, d_in)
+    ys = torch.randn(2, 10, d_out)
+    preds = model(xs, ys)
+    assert preds.shape == (2, 10, d_out)
+
+
+def test_model_multi_layer_gradient_flows():
+    """Gradients should flow to all layers and projections."""
+    d_in, d_out, d_model = 5, 1, 16
+    layers = [
+        MIRASLayer(MLPMemory(d_model, d_model, 8), L2Bias(), NoRetention(), GD()),
+        MIRASLayer(MLPMemory(d_model, d_model, 8), L2Bias(), NoRetention(), GD()),
+    ]
+    model = MIRASModel(d_in=d_in, d_out=d_out, layers=layers,
+                       use_projections=True, d_model=d_model, residual=True)
+    xs = torch.randn(2, 10, d_in)
+    ys = torch.randn(2, 10, d_out)
+    preds = model(xs, ys)
+    loss = ((preds - ys) ** 2).mean()
+    loss.backward()
+    assert model.layers[0].eta.grad is not None
+    assert model.layers[1].eta.grad is not None
+    assert model.proj_k.weight.grad is not None
+    assert model.proj_out.weight.grad is not None
+
+
+def test_model_single_layer_backward_compat():
+    """Single-layer model should behave identically to before."""
+    d_in, d_out = 5, 1
+    torch.manual_seed(123)
+    mem = MatrixMemory(d_in, d_out)
+    layer = MIRASLayer(mem, DotProductBias(), NoRetention(), GD())
+    model = MIRASModel(d_in=d_in, d_out=d_out, layers=[layer],
+                       use_projections=False, residual=False)
+    xs = torch.randn(2, 10, d_in)
+    ys = torch.randn(2, 10, d_out)
+    preds = model(xs, ys)
+    assert preds.shape == (2, 10, d_out)
+    assert torch.allclose(preds[:, 0, :], torch.zeros(2, d_out))
 
 
 def test_model_is_seq_model():
@@ -95,3 +145,62 @@ def test_model_gd_init():
     expected_k = torch.zeros(32, 5)
     expected_k[:5, :5] = torch.eye(5)
     assert torch.allclose(model.proj_k.weight, expected_k)
+
+
+# --- Factory tests ---
+
+from src.models.miras import build_miras_model
+from src.config import ModelConfig
+
+
+def test_build_miras_model_multi_layer():
+    """Factory should create N independent layers."""
+    config = ModelConfig()
+    config.type = "miras"
+    config.bias.type = "l2"
+    config.memory.type = "mlp"
+    config.memory.d_hidden = 16
+    config.retention.type = "none"
+    config.algorithm.type = "gd"
+    config.n_layers = 4
+    config.d_model = 32
+    config.use_projections = True
+    config.eta_init = 0.01
+    config.residual = True
+    model = build_miras_model(config, d_in=5, d_out=1)
+    assert len(model.layers) == 4
+    assert model.residual is True
+    # Each layer should have independent parameters
+    assert model.layers[0].eta is not model.layers[1].eta
+
+
+def test_build_miras_model_auto_projections():
+    """Factory should auto-enable projections when n_layers > 1."""
+    config = ModelConfig()
+    config.type = "miras"
+    config.bias.type = "dot_product"
+    config.memory.type = "matrix"
+    config.retention.type = "none"
+    config.algorithm.type = "gd"
+    config.n_layers = 2
+    config.d_model = 32
+    config.use_projections = False  # should be overridden
+    model = build_miras_model(config, d_in=5, d_out=1)
+    assert model.use_proj is True
+    assert len(model.layers) == 2
+
+
+def test_build_miras_model_single_layer_no_auto_proj():
+    """Factory should not auto-enable projections for single layer."""
+    config = ModelConfig()
+    config.type = "miras"
+    config.bias.type = "dot_product"
+    config.memory.type = "matrix"
+    config.retention.type = "none"
+    config.algorithm.type = "gd"
+    config.n_layers = 1
+    config.d_model = 32
+    config.use_projections = False
+    model = build_miras_model(config, d_in=5, d_out=1)
+    assert model.use_proj is False
+    assert len(model.layers) == 1

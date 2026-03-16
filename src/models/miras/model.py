@@ -30,17 +30,15 @@ class MIRASModel(SeqModel):
         use_projections: bool = False,
         d_model: int = 128,
         gd_init: bool = False,
+        residual: bool = False,
     ):
         super().__init__()
         self.d_in = d_in
         self.d_out = d_out
         self.d_model = d_model
         self.use_proj = use_projections
+        self.residual = residual
 
-        assert len(layers) == 1, (
-            "Multi-layer MIRAS not yet implemented. "
-            "Use n_layers=1 for now."
-        )
         self.layers = nn.ModuleList(layers)
 
         if use_projections:
@@ -81,7 +79,10 @@ class MIRASModel(SeqModel):
             q = queries[:, i] if self.use_proj else xs[:, i]
             h = q
             for layer_idx, layer in enumerate(self.layers):
-                h = layer.read(states[layer_idx], h)
+                if self.residual:
+                    h = h + layer.read(states[layer_idx], h)
+                else:
+                    h = layer.read(states[layer_idx], h)
             y_preds.append(self.proj_out(h) if self.use_proj else h)
 
             # --- Write ---
