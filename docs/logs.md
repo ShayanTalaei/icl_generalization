@@ -2,6 +2,48 @@
 
 ---
 
+## 2026-03-15: MIRAS Ablation Phase 1 -- Untrained Evaluation
+
+Evaluated all 8 MIRAS configs (2 bias x 2 memory x 2 retention) across 4 eta values and 3 tasks, untrained. 144 total evals.
+
+### Key finding: Retention is a no-op when untrained
+
+ScalarL2 retention with alpha_init=1.0 produces identical results to NoRetention (1.0 * state = state). Retention only matters when alpha is learned during training.
+
+### Best untrained MSE@100 per config
+
+| Config | Best eta | Linear | Poly2 | Poly3 |
+|---|---|---|---|---|
+| dp_matrix (baseline) | 0.01 | 0.1124 | 1.4407 | 2.2252 |
+| l2_matrix | 0.1/0.01 | **0.0002** / 0.1522 | 2.20 / **1.3894** | 3.54 / **2.1903** |
+| dp_mlp32 | 0.001 | 0.8490 | 1.3316 | 2.7792 |
+| dp_mlp64 | 0.001 | 0.7135 | 1.1758 | 2.4575 |
+| l2_mlp32 | 0.01 | 0.3181 | 0.9341 | 2.1756 |
+| **l2_mlp64** | **0.01** | **0.1274** | **0.8218** | **2.2952** |
+
+### Observations
+
+1. **L2 bias (Delta rule) helps across the board** -- self-correction allows higher eta and prevents divergence.
+2. **L2 + Matrix at eta=0.1** achieves near-perfect on linear (0.0002) but hurts on polynomials -- overfitting to linear structure.
+3. **L2 + MLP64 at eta=0.01** is the star performer: best on linear (0.1274) and poly2 (0.8218) without training.
+4. **DotProduct + MLP diverges at eta>=0.01** -- Hebbian rule is unstable with nonlinear memory.
+5. **Poly3 is much harder** -- all configs show MSE > 2.0, room for improvement with training.
+
+### Configs for Phase 2 (training)
+
+Dropping: all retention variants (identical to no-retention untrained). Will test retention during training where alpha is learned.
+
+Priority for training sweep:
+- baseline (dp_matrix_none) -- reference
+- l2_matrix_none -- effect of objective
+- dp_mlp64_none -- effect of nonlinear memory
+- l2_mlp64_none -- best untrained
+- All 8 configs with retention (to see if learned alpha helps)
+
+Data: `scratch/experiments/miras_ablation/phase1_untrained/results/`
+
+---
+
 ## 2026-03-15: MIRAS Framework Implementation & Reproduction
 
 Implemented the MIRAS framework (`src/models/miras/`) decomposing modern RNNs into 4 independent axes: attentional bias, memory structure, retention gate, memory algorithm. Verified equivalence against old `AssociativeRNN` (exact forward + gradient match), then reproduced all previous experiment results.
