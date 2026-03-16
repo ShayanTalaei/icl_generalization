@@ -1,6 +1,7 @@
 from .base import SeqModel
-from .rnn import LinearRNN, LinearRNNProjected, RNNModel
+from .rnn import RNNModel
 from .transformer import CausalTransformer
+from .miras import build_miras_model
 
 MODEL_REGISTRY: dict[str, type[SeqModel]] = {
     "transformer": CausalTransformer,
@@ -17,11 +18,7 @@ def build_model(config, d_in: int, d_out: int) -> SeqModel:
                                  pos_encoding=config.pos_encoding)
     elif config.type in ("lstm", "gru"):
         return RNNModel(**shared, rnn_type=config.type)
-    elif config.type == "linear_rnn":
-        gd_init = getattr(config, "gd_init", False)
-        return LinearRNN(**shared, gd_init=gd_init)
-    elif config.type == "linear_rnn_proj":
-        gd_init = getattr(config, "gd_init", False)
-        return LinearRNNProjected(**shared, gd_init=gd_init)
+    elif config.type == "miras":
+        return build_miras_model(config, d_in, d_out)
     else:
         raise ValueError(f"Unknown model type: {config.type}")
