@@ -90,6 +90,7 @@ class TaskConfig(pydra.Config):
         self.noise_std = 0.0
         self.degree = 2               # polynomial degree (polynomial task only)
         self.input_range = "gaussian"   # "gaussian" (N(0,I)) | "uniform" (U(-1,1))
+        self.normalize_output = False   # normalize ys to unit variance per sequence
 
 
 class TrainingConfig(pydra.Config):
@@ -120,4 +121,5 @@ def build_task(config):
     if config.type == "polynomial":
         kwargs["degree"] = config.degree
         kwargs["input_range"] = getattr(config, "input_range", "gaussian")
+        kwargs["normalize_output"] = getattr(config, "normalize_output", False)
     return task_cls(**kwargs)

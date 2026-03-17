@@ -84,12 +84,14 @@ class PolynomialTask(ICLTask):
 
     def __init__(self, d_input: int, d_output: int = 1,
                  degree: int = 2, noise_std: float = 0.0,
-                 input_range: str = "gaussian"):
+                 input_range: str = "gaussian",
+                 normalize_output: bool = False):
         self._d_input = d_input
         self._d_output = d_output
         self.degree = degree
         self.noise_std = noise_std
         self.input_range = input_range
+        self.normalize_output = normalize_output
         self._d_feat = polynomial_feature_dim(d_input, degree)
         self._index_cache = _build_monomial_indices(d_input, degree)
 
@@ -121,5 +123,11 @@ class PolynomialTask(ICLTask):
 
         if self.noise_std > 0:
             ys = ys + torch.randn_like(ys) * self.noise_std
+
+        if self.normalize_output:
+            # Normalize each sequence to have unit output variance
+            # This keeps the loss scale consistent across degrees
+            ys_std = ys.std(dim=1, keepdim=True).clamp(min=1e-8)
+            ys = ys / ys_std
 
         return ICLBatch(xs=xs, ys=ys)
