@@ -43,15 +43,22 @@ class GenConfig(pydra.Config):
 
 
 def generate_batch_on_device(d_input, d_output, d_feat, degree, index_cache,
-                             batch_size, num_examples, noise_std, device):
+                             batch_size, num_examples, noise_std, device,
+                             input_range="gaussian", normalize_output=False):
     """Generate one ICL batch directly on the given device."""
     n = num_examples + 1
-    xs = torch.randn(batch_size, n, d_input, device=device)
+    if input_range == "uniform":
+        xs = torch.rand(batch_size, n, d_input, device=device) * 2 - 1  # U(-1, 1)
+    else:
+        xs = torch.randn(batch_size, n, d_input, device=device)  # N(0, I)
     phi = _polynomial_features(xs, degree, index_cache)
     W = torch.randn(batch_size, d_feat, d_output, device=device) / (d_feat ** 0.5)
     ys = torch.bmm(phi, W)
     if noise_std > 0:
         ys = ys + torch.randn_like(ys) * noise_std
+    if normalize_output:
+        ys_std = ys.std(dim=1, keepdim=True).clamp(min=1e-8)
+        ys = ys / ys_std
     return xs.cpu(), ys.cpu()
 
 
@@ -65,12 +72,14 @@ def main(config: GenConfig):
     degree = getattr(config.task, "degree", 1)
     noise_std = config.task.noise_std
     d_feat = task.d_feat if hasattr(task, "d_feat") else d_in
+    input_range = getattr(config.task, "input_range", "gaussian")
+    normalize_output = getattr(config.task, "normalize_output", False)
     n_train = config.num_examples + 1
     n_eval = config.eval_num_examples + 1
 
     device = torch.device(config.device if torch.cuda.is_available() else "cpu")
 
-    print(f"Task: {config.task.type} (d_in={d_in}, d_out={d_out}, degree={degree})")
+    print(f"Task: {config.task.type} (d_in={d_in}, d_out={d_out}, degree={degree}, input_range={input_range}, normalize_output={normalize_output})")
     print(f"Device: {device}")
     print(f"Training: {config.num_train_batches} batches x {config.batch_size} x {n_train}")
     print(f"Eval:     {config.num_eval_batches} batches x {config.batch_size} x {n_eval}")
@@ -97,6 +106,7 @@ def main(config: GenConfig):
             xs, ys = generate_batch_on_device(
                 d_in, d_out, d_feat, degree, index_cache,
                 config.batch_size, config.num_examples, noise_std, device,
+                input_range=input_range, normalize_output=normalize_output,
             )
             train_xs[i] = xs
             train_ys[i] = ys
@@ -140,6 +150,8 @@ def main(config: GenConfig):
             "d_output": config.task.d_output,
             "degree": degree,
             "noise_std": noise_std,
+            "input_range": input_range,
+            "normalize_output": normalize_output,
             "seed": config.seed,
             "num_train_batches": config.num_train_batches,
             "num_eval_batches": config.num_eval_batches,
