@@ -6,6 +6,7 @@ input/output projections (the "outer loop" weights from nested learning).
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch import Tensor
 
 from ..base import SeqModel
@@ -31,6 +32,7 @@ class MIRASModel(SeqModel):
         d_model: int = 128,
         gd_init: bool = False,
         residual: bool = False,
+        normalize_qk: bool = False,
     ):
         super().__init__()
         self.d_in = d_in
@@ -38,6 +40,7 @@ class MIRASModel(SeqModel):
         self.d_model = d_model
         self.use_proj = use_projections
         self.residual = residual
+        self.normalize_qk = normalize_qk
 
         self.layers = nn.ModuleList(layers)
 
@@ -72,6 +75,9 @@ class MIRASModel(SeqModel):
             keys = self.proj_k(xs)              # (B, n, d_model)
             queries = self.proj_q(xs)            # (B, n, d_model)
             values = self.proj_v(ys[:, :-1, :])  # (B, n-1, d_model)
+            if self.normalize_qk:
+                keys = F.normalize(keys, dim=-1)
+                queries = F.normalize(queries, dim=-1)
 
         y_preds = []
         for i in range(n):
