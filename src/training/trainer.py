@@ -17,6 +17,21 @@ class Trainer:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
 
+        # Load pre-generated dataset if specified
+        self._dataset = None
+        self._dataset_idx = 0
+        self._eval_dataset = None
+        self._eval_dataset_idx = 0
+        dataset_path = getattr(config, "dataset_path", "")
+        if dataset_path:
+            data = torch.load(dataset_path, map_location=self.device, weights_only=True)
+            self._dataset = (data["xs"], data["ys"])
+            if "eval_xs" in data:
+                self._eval_dataset = (data["eval_xs"].to(self.device),
+                                      data["eval_ys"].to(self.device))
+            print(f"Loaded dataset: {dataset_path} "
+                  f"({data['xs'].shape[0]} batches, device={self.device})")
+
         self.optimizer = torch.optim.AdamW(
             model.parameters(),
             lr=config.lr,
@@ -40,9 +55,14 @@ class Trainer:
         for step in range(1, cfg.num_steps + 1):
             self.step = step
 
-            batch = self.task.sample_batch(cfg.batch_size, cfg.num_examples)
-            xs = batch.xs.to(self.device)
-            ys = batch.ys.to(self.device)
+            if self._dataset is not None:
+                xs = self._dataset[0][self._dataset_idx]
+                ys = self._dataset[1][self._dataset_idx]
+                self._dataset_idx = (self._dataset_idx + 1) % self._dataset[0].shape[0]
+            else:
+                batch = self.task.sample_batch(cfg.batch_size, cfg.num_examples)
+                xs = batch.xs.to(self.device)
+                ys = batch.ys.to(self.device)
 
             y_preds = self.model(xs, ys)
 
@@ -99,9 +119,14 @@ class Trainer:
         cfg = self.config
 
         for _ in range(num_batches):
-            batch = self.task.sample_batch(cfg.batch_size, cfg.num_examples)
-            xs = batch.xs.to(self.device)
-            ys = batch.ys.to(self.device)
+            if self._eval_dataset is not None:
+                xs = self._eval_dataset[0][self._eval_dataset_idx]
+                ys = self._eval_dataset[1][self._eval_dataset_idx]
+                self._eval_dataset_idx = (self._eval_dataset_idx + 1) % self._eval_dataset[0].shape[0]
+            else:
+                batch = self.task.sample_batch(cfg.batch_size, cfg.num_examples)
+                xs = batch.xs.to(self.device)
+                ys = batch.ys.to(self.device)
 
             y_preds = self.model(xs, ys)
             total_loss += nn.functional.mse_loss(

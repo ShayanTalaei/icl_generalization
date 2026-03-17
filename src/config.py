@@ -102,6 +102,7 @@ class TrainingConfig(pydra.Config):
         self.eval_every = 1000
         self.checkpoint_every = 0     # 0 = disabled
         self.checkpoint_dir = "checkpoints"
+        self.dataset_path = ""          # path to pre-generated .pt dataset (empty = online generation)
 
 
 def build_task(config):
