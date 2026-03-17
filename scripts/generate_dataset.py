@@ -73,7 +73,8 @@ def main(config: GenConfig):
     noise_std = config.task.noise_std
     d_feat = task.d_feat if hasattr(task, "d_feat") else d_in
     input_range = getattr(config.task, "input_range", "gaussian")
-    normalize_output = getattr(config.task, "normalize_output", False)
+    _norm_raw = getattr(config.task, "normalize_output", False)
+    normalize_output = _norm_raw if isinstance(_norm_raw, bool) else str(_norm_raw).lower() == "true"
     n_train = config.num_examples + 1
     n_eval = config.eval_num_examples + 1
 

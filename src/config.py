@@ -44,6 +44,7 @@ class ModelConfig(pydra.Config):
         self.residual = False           # residual connections between MIRAS layers
         self.normalize_qk = False       # L2-normalize projected keys and queries
         self.output_norm = False        # RMSNorm on each layer's output (DeltaNet/Mamba convention)
+        self.aggregate = "sequential"   # "sequential" (chain layers) | "additive" (sum predictions)
 
         # MIRAS-specific (nested)
         self.memory = MemoryStructureConfig()
@@ -90,7 +91,7 @@ class TaskConfig(pydra.Config):
         self.noise_std = 0.0
         self.degree = 2               # polynomial degree (polynomial task only)
         self.input_range = "gaussian"   # "gaussian" (N(0,I)) | "uniform" (U(-1,1))
-        self.normalize_output = False   # normalize ys to unit variance per sequence
+        self.normalize_output = ""      # "" (off) | "constant" (fixed scale per degree) | "per_sequence" (unit variance per seq)
 
 
 class TrainingConfig(pydra.Config):
@@ -121,5 +122,6 @@ def build_task(config):
     if config.type == "polynomial":
         kwargs["degree"] = config.degree
         kwargs["input_range"] = getattr(config, "input_range", "gaussian")
-        kwargs["normalize_output"] = getattr(config, "normalize_output", False)
+        _norm = getattr(config, "normalize_output", "")
+        kwargs["normalize_output"] = _norm if _norm else False
     return task_cls(**kwargs)

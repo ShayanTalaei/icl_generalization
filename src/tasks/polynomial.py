@@ -94,6 +94,19 @@ class PolynomialTask(ICLTask):
         self.normalize_output = normalize_output
         self._d_feat = polynomial_feature_dim(d_input, degree)
         self._index_cache = _build_monomial_indices(d_input, degree)
+        if normalize_output == "constant":
+            self._output_scale = self._compute_output_scale()
+
+    def _compute_output_scale(self, n_samples: int = 10000) -> float:
+        """Compute sqrt(E[y^2]) for constant normalization."""
+        # Generate samples to estimate output variance
+        n = 41  # training length
+        xs = torch.randn(n_samples, n, self._d_input) if self.input_range == "gaussian" \
+            else torch.rand(n_samples, n, self._d_input) * 2 - 1
+        phi = _polynomial_features(xs, self.degree, self._index_cache)
+        W = torch.randn(n_samples, self._d_feat, self._d_output) / (self._d_feat ** 0.5)
+        ys = torch.bmm(phi, W)
+        return float(ys.pow(2).mean().sqrt())
 
     @property
     def d_in(self) -> int:
@@ -125,9 +138,14 @@ class PolynomialTask(ICLTask):
             ys = ys + torch.randn_like(ys) * self.noise_std
 
         if self.normalize_output:
-            # Normalize each sequence to have unit output variance
-            # This keeps the loss scale consistent across degrees
-            ys_std = ys.std(dim=1, keepdim=True).clamp(min=1e-8)
-            ys = ys / ys_std
+            if self.normalize_output == "constant":
+                # Constant-factor normalization: divide by pre-computed scale
+                # Preserves linear-in-features structure (Garg et al. approach)
+                ys = ys / self._output_scale
+            else:
+                # Per-sequence normalization: each sequence gets unit variance
+                # WARNING: changes task structure (adds nonlinearity)
+                ys_std = ys.std(dim=1, keepdim=True).clamp(min=1e-8)
+                ys = ys / ys_std
 
         return ICLBatch(xs=xs, ys=ys)
