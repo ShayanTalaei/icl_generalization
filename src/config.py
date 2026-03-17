@@ -14,6 +14,7 @@ class AttentionalBiasConfig(pydra.Config):
     def __init__(self):
         super().__init__()
         self.type = "dot_product"   # dot_product | l2
+        self.clip_error = 0.0       # clip L2 error signal norm (0 = off)
 
 
 class RetentionGateConfig(pydra.Config):
