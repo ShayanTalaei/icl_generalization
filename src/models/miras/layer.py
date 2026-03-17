@@ -8,6 +8,7 @@ Implements the two-phase write protocol:
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch import Tensor
 
 from .state_utils import MemoryState, OptimState
@@ -17,12 +18,17 @@ from .retention import RetentionGate
 from .algorithm import MemoryAlgorithm
 
 
+def _inverse_softplus(x: float) -> float:
+    """Compute the inverse of softplus: log(exp(x) - 1)."""
+    return float(torch.tensor(x).expm1().log())
+
+
 class MIRASLayer(nn.Module):
     """Single MIRAS memory layer composing 4 axes.
 
     Learnable parameters:
-        eta: inner-loop learning rate
-        alpha: retention strength
+        _log_eta: unconstrained parameter; eta = softplus(_log_eta) > 0
+        _log_alpha: unconstrained parameter; alpha = softplus(_log_alpha) > 0
     """
 
     def __init__(
@@ -37,8 +43,39 @@ class MIRASLayer(nn.Module):
         self.bias = bias
         self.retention = retention
         self.algorithm = algorithm
-        self.eta = nn.Parameter(torch.tensor(1.0))
-        self.alpha = nn.Parameter(torch.tensor(1.0))
+        # Store unconstrained parameters; use softplus to ensure positivity
+        self._log_eta = nn.Parameter(torch.tensor(_inverse_softplus(1.0)))
+        self._log_alpha = nn.Parameter(torch.tensor(_inverse_softplus(1.0)))
+
+    @property
+    def eta(self) -> Tensor:
+        """Inner-loop learning rate (always positive via softplus)."""
+        return F.softplus(self._log_eta)
+
+    @eta.setter
+    def eta(self, value):
+        """Allow setting eta for backward compatibility (e.g., eta.fill_())."""
+        # This is a no-op setter; use set_eta() instead
+        pass
+
+    @property
+    def alpha(self) -> Tensor:
+        """Retention strength (always positive via softplus)."""
+        return F.softplus(self._log_alpha)
+
+    @alpha.setter
+    def alpha(self, value):
+        pass
+
+    def set_eta(self, value: float):
+        """Set eta to a specific positive value."""
+        with torch.no_grad():
+            self._log_eta.fill_(_inverse_softplus(value))
+
+    def set_alpha(self, value: float):
+        """Set alpha to a specific positive value."""
+        with torch.no_grad():
+            self._log_alpha.fill_(_inverse_softplus(value))
 
     def init_state(
         self, B: int, device, dtype

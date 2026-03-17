@@ -60,7 +60,7 @@ def test_model_gradient_flows():
     loss.backward()
     assert model.proj_k.weight.grad is not None
     assert model.proj_out.weight.grad is not None
-    assert model.layers[0].eta.grad is not None
+    assert model.layers[0]._log_eta.grad is not None
 
 
 def test_model_multi_layer_no_residual():
@@ -107,8 +107,8 @@ def test_model_multi_layer_gradient_flows():
     preds = model(xs, ys)
     loss = ((preds - ys) ** 2).mean()
     loss.backward()
-    assert model.layers[0].eta.grad is not None
-    assert model.layers[1].eta.grad is not None
+    assert model.layers[0]._log_eta.grad is not None
+    assert model.layers[1]._log_eta.grad is not None
     assert model.proj_k.weight.grad is not None
     assert model.proj_out.weight.grad is not None
 
@@ -171,7 +171,7 @@ def test_build_miras_model_multi_layer():
     assert len(model.layers) == 4
     assert model.residual is True
     # Each layer should have independent parameters
-    assert model.layers[0].eta is not model.layers[1].eta
+    assert model.layers[0]._log_eta is not model.layers[1]._log_eta
 
 
 def test_build_miras_model_auto_projections():

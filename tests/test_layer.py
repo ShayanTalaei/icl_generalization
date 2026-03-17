@@ -34,8 +34,8 @@ def test_layer_write_then_read_hebbian():
     """After writing (k, v) with dot-product bias, reading k should return eta * v."""
     layer = _make_layer(d_k=3, d_v=2, bias="dot_product", retention="none")
     with torch.no_grad():
-        layer.eta.fill_(1.0)
-        layer.alpha.fill_(1.0)
+        layer.set_eta(1.0)
+        layer.set_alpha(1.0)
 
     state = layer.init_state(B=1, device="cpu", dtype=torch.float32)
     k = torch.tensor([[1.0, 0.0, 0.0]])
@@ -50,8 +50,8 @@ def test_layer_write_then_read_delta():
     """Delta rule: first write with zero state gives same result as Hebbian."""
     layer = _make_layer(d_k=3, d_v=2, bias="l2", retention="none")
     with torch.no_grad():
-        layer.eta.fill_(1.0)
-        layer.alpha.fill_(1.0)
+        layer.set_eta(1.0)
+        layer.set_alpha(1.0)
 
     state = layer.init_state(B=1, device="cpu", dtype=torch.float32)
     k = torch.tensor([[1.0, 0.0, 0.0]])
@@ -66,8 +66,8 @@ def test_layer_retention_scalar_l2():
     """With scalar retention, old state should be decayed."""
     layer = _make_layer(d_k=3, d_v=2, bias="dot_product", retention="scalar_l2")
     with torch.no_grad():
-        layer.eta.fill_(1.0)
-        layer.alpha.fill_(0.5)
+        layer.set_eta(1.0)
+        layer.set_alpha(0.5)
 
     state = layer.init_state(B=1, device="cpu", dtype=torch.float32)
     k = torch.tensor([[1.0, 0.0, 0.0]])
@@ -87,8 +87,8 @@ def test_layer_retention_scalar_l2():
 def test_layer_eta_alpha_are_parameters():
     layer = _make_layer()
     param_names = {name for name, _ in layer.named_parameters()}
-    assert "eta" in param_names
-    assert "alpha" in param_names
+    assert "_log_eta" in param_names
+    assert "_log_alpha" in param_names
 
 
 def test_layer_mlp_memory_write_read():
@@ -96,8 +96,8 @@ def test_layer_mlp_memory_write_read():
     torch.manual_seed(42)
     layer = _make_layer(d_k=3, d_v=3, bias="l2", memory="mlp")
     with torch.no_grad():
-        layer.eta.fill_(0.01)
-        layer.alpha.fill_(1.0)
+        layer.set_eta(0.01)
+        layer.set_alpha(1.0)
 
     state = layer.init_state(B=2, device="cpu", dtype=torch.float32)
     k = torch.randn(2, 3)

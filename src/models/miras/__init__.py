@@ -94,9 +94,8 @@ def build_miras_model(config, d_in: int, d_out: int) -> MIRASModel:
         algorithm = ALGORITHM_REGISTRY[config.algorithm.type]()
         memory = _build_memory(config.memory, d_k, d_v)
         layer = MIRASLayer(memory, bias, retention, algorithm)
-        with torch.no_grad():
-            layer.eta.fill_(eta_init)
-            layer.alpha.fill_(alpha_init)
+        layer.set_eta(eta_init)
+        layer.set_alpha(alpha_init)
         layers.append(layer)
 
     return MIRASModel(
