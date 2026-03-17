@@ -13,6 +13,19 @@ from ..base import SeqModel
 from .layer import MIRASLayer
 
 
+class RMSNorm(nn.Module):
+    """Root Mean Square Layer Normalization (Zhang & Sennrich, 2019)."""
+
+    def __init__(self, d: int, eps: float = 1e-8):
+        super().__init__()
+        self.scale = nn.Parameter(torch.ones(d))
+        self.eps = eps
+
+    def forward(self, x: Tensor) -> Tensor:
+        rms = x.pow(2).mean(dim=-1, keepdim=True).add(self.eps).sqrt()
+        return x / rms * self.scale
+
+
 class MIRASModel(SeqModel):
     """MIRAS sequence model for in-context learning.
 
@@ -33,6 +46,8 @@ class MIRASModel(SeqModel):
         gd_init: bool = False,
         residual: bool = False,
         normalize_qk: bool = False,
+        output_norm: bool = False,
+        aggregate: str = "sequential",  # "sequential" | "additive"
     ):
         super().__init__()
         self.d_in = d_in
@@ -41,8 +56,16 @@ class MIRASModel(SeqModel):
         self.use_proj = use_projections
         self.residual = residual
         self.normalize_qk = normalize_qk
+        self.output_norm = output_norm
+        self.aggregate = aggregate
 
         self.layers = nn.ModuleList(layers)
+
+        # RMSNorm on each layer's read output (DeltaNet/Mamba convention)
+        if output_norm and use_projections:
+            self.layer_norms = nn.ModuleList(
+                [RMSNorm(d_model) for _ in layers]
+            )
 
         if use_projections:
             self.proj_k = nn.Linear(d_in, d_model, bias=False)
@@ -82,14 +105,26 @@ class MIRASModel(SeqModel):
         y_preds = []
         for i in range(n):
             # --- Read ---
-            q = queries[:, i] if self.use_proj else xs[:, i]
-            h = q
-            for layer_idx, layer in enumerate(self.layers):
-                if self.residual:
-                    h = h + layer.read(states[layer_idx], h)
-                else:
-                    h = layer.read(states[layer_idx], h)
-            y_preds.append(self.proj_out(h) if self.use_proj else h)
+            if self.aggregate == "additive" and not self.use_proj:
+                # Additive mode: each layer reads the same query, predictions summed
+                q = xs[:, i]
+                pred = torch.zeros(B, self.d_out, device=xs.device, dtype=xs.dtype)
+                for layer_idx, layer in enumerate(self.layers):
+                    pred = pred + layer.read(states[layer_idx], q)
+                y_preds.append(pred)
+            else:
+                # Sequential mode: layers chain outputs
+                q = queries[:, i] if self.use_proj else xs[:, i]
+                h = q
+                for layer_idx, layer in enumerate(self.layers):
+                    layer_out = layer.read(states[layer_idx], h)
+                    if self.output_norm and self.use_proj:
+                        layer_out = self.layer_norms[layer_idx](layer_out)
+                    if self.residual:
+                        h = h + layer_out
+                    else:
+                        h = layer_out
+                y_preds.append(self.proj_out(h) if self.use_proj else h)
 
             # --- Write ---
             if i < n - 1:

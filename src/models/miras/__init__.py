@@ -107,4 +107,6 @@ def build_miras_model(config, d_in: int, d_out: int) -> MIRASModel:
         gd_init=getattr(config, "gd_init", False),
         residual=residual,
         normalize_qk=getattr(config, "normalize_qk", False),
+        output_norm=getattr(config, "output_norm", False),
+        aggregate=getattr(config, "aggregate", "sequential"),
     )
