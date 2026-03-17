@@ -90,6 +90,7 @@ class TaskConfig(pydra.Config):
         self.d_output = 1
         self.noise_std = 0.0
         self.degree = 2               # polynomial degree (polynomial task only)
+        self.max_degree = 11          # Chebyshev max degree (chebyshev task only)
         self.input_range = "gaussian"   # "gaussian" (N(0,I)) | "uniform" (U(-1,1))
         self.normalize_output = ""      # "" (off) | "constant" (fixed scale per degree) | "per_sequence" (unit variance per seq)
 
@@ -114,6 +115,13 @@ def build_task(config):
     """Construct a task from a TaskConfig."""
     from src.tasks import TASK_REGISTRY
     task_cls = TASK_REGISTRY[config.type]
+    if config.type == "chebyshev":
+        return task_cls(
+            max_degree=getattr(config, "max_degree", 11),
+            noise_std=config.noise_std,
+            # Only "constant" enables normalization; any other non-empty string is ignored.
+            normalize_output=getattr(config, "normalize_output", "") == "constant",
+        )
     kwargs = dict(
         d_input=config.d_input,
         d_output=config.d_output,
