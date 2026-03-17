@@ -109,6 +109,9 @@ class TrainingConfig(pydra.Config):
         self.checkpoint_every = 0     # 0 = disabled
         self.checkpoint_dir = "checkpoints"
         self.dataset_path = ""          # path to pre-generated .pt dataset (empty = online generation)
+        self.curriculum = False         # enable curriculum learning (linearly ramp num_examples)
+        self.curriculum_start = 10      # starting num_examples at step 1
+        self.curriculum_end_step = 0    # step at which ramp completes; 0 = num_steps // 2
 
 
 def build_task(config):
