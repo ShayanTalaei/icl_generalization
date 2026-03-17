@@ -75,6 +75,45 @@ def test_chebyshev_output_scale():
     assert 0.5 < std.item() < 2.0, f"Expected y std ~ 1, got {std.item()}"
 
 
+def _load_eval_icl():
+    """Load the eval_icl module from scripts/ (not on sys.path by default)."""
+    import importlib.util
+    import os
+
+    spec = importlib.util.spec_from_file_location(
+        "eval_icl",
+        os.path.join(Path(__file__).resolve().parent.parent, "scripts", "eval_icl.py"),
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_chebyshev_ridge_baseline_shape():
+    """Should return a tensor of shape (num_examples + 1,)."""
+    mod = _load_eval_icl()
+    task = ChebyshevTask(max_degree=5)
+    losses = mod.chebyshev_ridge_baseline(
+        task, num_examples=10, batch_size=32, num_batches=3, device="cpu"
+    )
+    assert losses.shape == (11,), f"Expected shape (11,), got {losses.shape}"
+
+
+def test_chebyshev_ridge_baseline_decreasing():
+    """Ridge MSE should generally decrease as more demonstrations are added."""
+    mod = _load_eval_icl()
+    torch.manual_seed(42)
+    task = ChebyshevTask(max_degree=5)
+    losses = mod.chebyshev_ridge_baseline(
+        task, num_examples=30, batch_size=128, num_batches=20, device="cpu"
+    )
+    # Loss at position 12+ should be lower than at position 1
+    # (degree-5 poly needs 6 points; 12 is well past convergence)
+    assert losses[12].item() < losses[1].item(), (
+        f"Ridge MSE should decrease: pos 1={losses[1]:.4f}, pos 12={losses[12]:.4f}"
+    )
+
+
 def test_build_chebyshev_task_from_config():
     """build_task should produce a ChebyshevTask from config."""
     from src.config import TaskConfig, build_task
