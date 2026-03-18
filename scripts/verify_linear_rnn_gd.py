@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import torch
-from src.models.rnn import LinearRNN
+from src.models.rnn import AssociativeRNN, MatrixMemory
 from src.tasks.linear import LinearTask
 
 def set_gd_weights(model, d_in, d_out, eta=1.0):
@@ -37,7 +37,9 @@ def set_gd_weights(model, d_in, d_out, eta=1.0):
 def main():
     d_in, d_out, d_model = 3, 1, 128
     task = LinearTask(d_input=d_in, d_output=d_out)
-    model = LinearRNN(d_in=d_in, d_out=d_out, d_model=d_model)
+    memory = MatrixMemory(d_model, d_model, update_rule="hebbian")
+    model = AssociativeRNN(d_in=d_in, d_out=d_out, memory=memory,
+                           use_projections=True, d_model=d_model)
 
     # --- Random init ---
     model.eval()

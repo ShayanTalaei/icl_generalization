@@ -2,6 +2,122 @@
 
 ---
 
+## 2026-03-17: Sequential Multi-Layer on Normalized Task + Stability Fix
+
+### Goal
+
+Two parallel workstreams:
+1. **Sequential multi-layer** on constant-normalized poly3 — test whether chaining layers (not additive) helps now that the task is fixed
+2. **L2 error signal clipping** to stabilize l2_mlp64 on poly6/poly10
+
+### Phase 1: Sequential multi-layer on normalized poly3 (20K steps)
+
+**Note:** eval_query_loss is measured at position 200 (the eval dataset has 200 demos). This is different from the position-40 eval in prior experiments. Models trained on 40-demo sequences are tested for ICL generalization at 200.
+
+#### n_layers sweep: l2_mlp64 (L2+MLP64, d_model=128, proj, normQK)
+
+| Config | eval@200 | vs n=1 |
+|--------|----------|--------|
+| n=1 | 153.89 | baseline (terrible — proj+MLP diverges at long sequences) |
+| n=2 | 66.90 | -57% |
+| n=4 | 10.15 | -93% |
+| n=8 | **8.23** | -95% |
+
+Multi-layer dramatically improves MLP memory with projections, but results are still far from single-layer no-proj (0.780 at pos 40, 0.657 at pos 200). Projections + MLP remains toxic for generalization.
+
+#### n_layers sweep: l2_matrix (L2+Matrix, d_model=128, proj, normQK)
+
+| Config | eval@200 |
+|--------|----------|
+| n=1 | **1.97** |
+| n=2 | 2.18 |
+| n=4 | 2.35 |
+| n=4, residual | 2.35 |
+| n=8 | 2.50 |
+
+**Matrix memory gets WORSE with more layers** (1.97 → 2.50). Chaining linear regressions in sequential mode does not help. Residual connections have zero effect for matrix memory.
+
+### Phase 1 continued: Poly6 multi-layer
+
+| Config | eval@200 |
+|--------|----------|
+| l2_matrix n=1, proj | 0.6733 |
+| l2_matrix n=4, proj | **0.6730** |
+| l2_matrix n=4, proj, residual | *running* |
+| l2_matrix n=8, proj | *running* |
+| l2_mlp64 n=4, proj, clip=5 | *running* |
+
+Multi-layer barely helps on poly6 with matrix memory — depth does not overcome the linearity limitation.
+
+#### Combining fixes: MLP multi-layer + clip on poly6
+
+| Config | eval@200 |
+|--------|----------|
+| l2_mlp64 n=4, proj, clip=5.0 | 0.6912 |
+
+MLP multi-layer with error clipping works (no NaN!) but is slightly worse than single-layer no-proj clip=5.0 (0.665). Projections still bottleneck.
+
+#### Poly10: all approaches diverge
+
+| Config | Status |
+|--------|--------|
+| l2_matrix n=4, proj, dataset | DIVERGED@2593 |
+| l2_mlp64 clip=5.0, online gen | DIVERGED@1895 |
+| l2_matrix, online gen | DIVERGED@1895 |
+
+Poly10 diverges regardless of approach. The pre-generated dataset has a bad batch at index 2592 (ys std=10.5, max=539 — the constant normalization has fat tails). Online generation also diverges at a different step. The poly10 task with 3002 features is genuinely too hard for the current training recipe (20K steps, lr=3e-4).
+
+### Stability Fix: L2 Error Signal Clipping
+
+Root cause analysis: L2 bias creates a positive feedback loop with MLP memory. The error signal `e = y - y_hat` grows as the MLP state diverges, amplifying gradients through `W1^T @ d_out`. DotProduct bias (`e = y`, constant) doesn't have this issue.
+
+Fix: clip error signal norm to a threshold while preserving direction: `e = e * min(1, clip/||e||)`. Added `clip_error` parameter to L2Bias in `src/models/miras/bias.py`.
+
+#### Poly6 clip sweep (l2_mlp64, single-layer, no proj, constant norm)
+
+| clip_error | eval@200 | Notes |
+|-----------|----------|-------|
+| 0 (off) | **NaN@669** | original failure |
+| 0.5 | 0.7987 | stable! |
+| 1.0 | 0.7318 | |
+| 2.0 | 0.6880 | |
+| 5.0 | **0.6650** | new best poly6 result! |
+
+**The stability fix works beautifully on poly6.** clip=5.0 gives 0.665 — a **35% improvement** over the previous best (1.025 with dp_matrix). The clipped l2_mlp64 combines the Delta rule's self-correction with MLP's nonlinear capacity.
+
+Higher clip values are better (less restrictive) as long as they prevent NaN. The optimal threshold depends on the task's error magnitude distribution.
+
+#### Poly3 with clip (sanity check)
+
+| clip_error | eval@200 |
+|-----------|----------|
+| 0 (off) | 0.657 (from prior experiments) |
+| 1.0 | 77.21 |
+
+**Clip hurts poly3 dramatically.** On poly3, the L2 error signal is naturally bounded (outputs have std ≈ 1.0), so clipping is unnecessary and limits the model's correction ability at long sequences.
+
+#### Poly10 with clip
+
+| clip_error | Status |
+|-----------|--------|
+| 0 (off) | NaN@6 |
+| 0.5 | DIVERGED@2593 |
+| 1.0 | DIVERGED@2593 |
+| 5.0 | DIVERGED@2593 |
+
+**Clip does not fix poly10.** All three clip values diverge at exactly step 2593 (same batch triggers all). The divergence is in the outer training loop (meta-learning), not the inner memory update. The poly10 dataset normalization is imperfect (ys_std=1.36 vs target 1.0), and with 3002 features, the optimization landscape is much harder.
+
+### Key Findings
+
+1. **Sequential multi-layer**: Matrix memory gets worse with depth; MLP memory improves dramatically but can't beat no-proj baselines. Projections remain the bottleneck.
+2. **Error signal clipping stabilizes l2_mlp64 on poly6**: clip=5.0 achieves 0.665, the new best poly6 result (35% improvement over dp_matrix baseline).
+3. **Clip is task-specific**: helps poly6 (was NaN), hurts poly3 (limits correction), doesn't fix poly10 (outer-loop issue).
+4. **Multi-layer + matrix memory on poly6**: 0.673 at eval@200, similar to single-layer (0.673). No benefit from depth for matrix on poly6.
+
+Data: `scratch/experiments/miras_multilayer/phase1_seq_nlayers/`, `stability_fix/`
+
+---
+
 ## 2026-03-16: Multi-Layer MIRAS — First Results
 
 **Goal**: Add multi-layer support and improve poly3/poly6 ICL performance.
