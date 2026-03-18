@@ -25,7 +25,8 @@ import torch
 
 from src.config import ModelConfig, TaskConfig, build_task
 from src.models import build_model
-from src.tasks.chebyshev import chebyshev_ridge_baseline, ChebyshevTask
+from src.eval.baselines import chebyshev_ridge_baseline
+from src.tasks.chebyshev import ChebyshevTask
 from src.utils.seed import set_seed
 
 

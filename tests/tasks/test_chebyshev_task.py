@@ -2,7 +2,8 @@
 
 import torch
 import pytest
-from src.tasks.chebyshev import chebyshev_features, chebyshev_ridge_baseline, ChebyshevTask
+from src.eval.baselines import chebyshev_ridge_baseline
+from src.tasks.chebyshev import chebyshev_features, ChebyshevTask
 
 
 def test_chebyshev_recurrence():
