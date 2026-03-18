@@ -1,9 +1,6 @@
 """Tests for ChebyshevTask and associated utilities."""
 
-import sys
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import torch
 import pytest
@@ -82,7 +79,7 @@ def _load_eval_icl():
 
     spec = importlib.util.spec_from_file_location(
         "eval_icl",
-        os.path.join(Path(__file__).resolve().parent.parent, "scripts", "eval_icl.py"),
+        os.path.join(Path(__file__).resolve().parent.parent.parent, "scripts", "eval_icl.py"),
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
