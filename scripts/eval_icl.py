@@ -25,6 +25,7 @@ import torch
 
 from src.config import ModelConfig, TaskConfig, build_task
 from src.models import build_model
+from src.tasks.chebyshev import chebyshev_ridge_baseline, ChebyshevTask
 from src.utils.seed import set_seed
 
 
@@ -42,77 +43,6 @@ class EvalConfig(pydra.Config):
         self.label = ""               # identifier for this run (used in filename + plot)
         self.with_ridge_baseline = False   # also compute Chebyshev ridge baseline
         self.ridge_lambda = 0.2            # ridge regularization (Wilcoxson et al. use 0.2)
-
-
-@torch.no_grad()
-def chebyshev_ridge_baseline(
-    task,
-    num_examples: int,
-    batch_size: int,
-    num_batches: int,
-    device,
-    ridge_lambda: float = 0.2,
-) -> torch.Tensor:
-    """Compute per-position MSE for the Chebyshev ridge regression baseline.
-
-    At each position n (having seen n demonstrations), fits ridge regression
-    in the Chebyshev basis on (x_1, y_1), ..., (x_n, y_n) and predicts y_{n+1}.
-
-    Only works for ChebyshevTask (d_in=1).
-
-    Args:
-        task: ChebyshevTask instance.
-        num_examples: number of demonstration positions to evaluate.
-        batch_size: batch size.
-        num_batches: number of batches to average over.
-        device: torch device for computation.
-        ridge_lambda: ridge regularization strength.
-
-    Returns:
-        losses: (num_examples + 1,) tensor of per-position MSE.
-    """
-    from src.tasks.chebyshev import ChebyshevTask, chebyshev_features
-
-    if not isinstance(task, ChebyshevTask):
-        raise ValueError("chebyshev_ridge_baseline only supports ChebyshevTask")
-
-    n = num_examples + 1
-    total_se = torch.zeros(n)
-    max_degree = task.max_degree
-    D = max_degree + 1  # feature dimension
-
-    for _ in range(num_batches):
-        batch = task.sample_batch(batch_size, num_examples)
-        xs = batch.xs.squeeze(-1).to(device)  # (B, n)
-        ys = batch.ys.squeeze(-1).to(device)  # (B, n)
-
-        # Chebyshev features: (B, n, D)
-        feats = chebyshev_features(xs, max_degree)
-
-        se_per_pos = torch.zeros(n)
-        for pos in range(n):
-            if pos == 0:
-                # No demonstrations: predict 0
-                pred = torch.zeros(batch_size, device=device)
-            else:
-                # Fit ridge on the first `pos` demonstrations
-                F = feats[:, :pos, :]      # (B, pos, D)
-                y_ctx = ys[:, :pos]        # (B, pos)
-                FtF = torch.bmm(F.transpose(1, 2), F)  # (B, D, D)  where D = max_degree+1
-                reg = ridge_lambda * torch.eye(D, device=device).unsqueeze(0)
-                FtF_reg = FtF + reg
-                Fty = torch.bmm(F.transpose(1, 2), y_ctx.unsqueeze(-1))  # (B, D, 1)
-                w = torch.linalg.solve(FtF_reg, Fty).squeeze(-1)  # (B, D)
-                # Predict at query position
-                q_feat = feats[:, pos, :]  # (B, D)
-                pred = (q_feat * w).sum(dim=-1)  # (B,)
-
-            target = ys[:, pos]  # (B,)
-            se_per_pos[pos] = ((pred - target) ** 2).mean().item()
-
-        total_se += se_per_pos
-
-    return total_se / num_batches
 
 
 @torch.no_grad()
@@ -187,7 +117,6 @@ def main(config: EvalConfig):
     }
 
     if config.with_ridge_baseline:
-        from src.tasks.chebyshev import ChebyshevTask
         if isinstance(task, ChebyshevTask):
             ridge_losses = chebyshev_ridge_baseline(
                 task,
