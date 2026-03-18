@@ -8,6 +8,11 @@ class LinearTask(ICLTask):
 
     Each sequence samples a fresh W ~ N(0, I/d_in), then generates
     (x, y) pairs with x ~ N(0, I) and y = Wx + noise.
+
+    The 1/sqrt(d_in) scaling on W keeps Var(y_i) = 1 regardless of input
+    dimension.  This is standard for linear ICL tasks, used in Garg et al.
+    (2022, arXiv:2208.01066) and Akyürek et al. (2022, arXiv:2211.15661).
+    Gaussian inputs x ~ N(0, I) are the standard choice for linear ICL.
     """
 
     def __init__(self, d_input: int, d_output: int = 1, noise_std: float = 0.0):

@@ -90,10 +90,8 @@ class TaskConfig(pydra.Config):
         self.d_input = 10
         self.d_output = 1
         self.noise_std = 0.0
-        self.degree = 2               # polynomial degree (polynomial task only)
         self.max_degree = 11          # Chebyshev max degree (chebyshev task only)
-        self.input_range = "gaussian"   # "gaussian" (N(0,I)) | "uniform" (U(-1,1))
-        self.normalize_output = ""      # "" (off) | "constant" (fixed scale per degree) | "per_sequence" (unit variance per seq)
+        self.sparsity = 3             # sparse_linear: number of non-zero coords
 
 
 class TrainingConfig(pydra.Config):
@@ -123,17 +121,12 @@ def build_task(config):
         return task_cls(
             max_degree=getattr(config, "max_degree", 11),
             noise_std=config.noise_std,
-            # Only "constant" enables normalization; any other non-empty string is ignored.
-            normalize_output=getattr(config, "normalize_output", "") == "constant",
         )
     kwargs = dict(
         d_input=config.d_input,
         d_output=config.d_output,
         noise_std=config.noise_std,
     )
-    if config.type == "polynomial":
-        kwargs["degree"] = config.degree
-        kwargs["input_range"] = getattr(config, "input_range", "gaussian")
-        _norm = getattr(config, "normalize_output", "")
-        kwargs["normalize_output"] = _norm if _norm else False
+    if config.type == "sparse_linear":
+        kwargs["sparsity"] = getattr(config, "sparsity", 3)
     return task_cls(**kwargs)

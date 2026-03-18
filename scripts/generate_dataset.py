@@ -2,16 +2,16 @@
 
 Generates N training batches + M eval batches and saves as a single .pt file.
 All configs within an experiment phase should use the same dataset for
-fair comparison. Uses GPU for fast polynomial feature expansion.
+fair comparison.
 
 Usage:
     python scripts/generate_dataset.py \
-        task.type=polynomial task.d_input=5 task.d_output=1 task.degree=3 \
+        task.type=linear task.d_input=20 task.d_output=1 \
         num_train_batches=50000 num_eval_batches=50 \
         batch_size=64 num_examples=40 \
         eval_num_examples=200 \
         seed=42 \
-        output_path=scratch/data/poly3_50k.pt
+        output_path=scratch/data/linear_d20_50k.pt
 """
 
 import sys
@@ -24,7 +24,6 @@ import torch
 from tqdm import tqdm
 
 from src.config import TaskConfig, build_task
-from src.tasks.polynomial import _build_monomial_indices, _polynomial_features
 from src.utils.seed import set_seed
 
 
@@ -39,27 +38,6 @@ class GenConfig(pydra.Config):
         self.eval_num_examples = 200  # eval context length (for ICL curves)
         self.seed = 42
         self.output_path = ""
-        self.device = "cuda:0"        # device for generation
-
-
-def generate_batch_on_device(d_input, d_output, d_feat, degree, index_cache,
-                             batch_size, num_examples, noise_std, device,
-                             input_range="gaussian", normalize_output=False):
-    """Generate one ICL batch directly on the given device."""
-    n = num_examples + 1
-    if input_range == "uniform":
-        xs = torch.rand(batch_size, n, d_input, device=device) * 2 - 1  # U(-1, 1)
-    else:
-        xs = torch.randn(batch_size, n, d_input, device=device)  # N(0, I)
-    phi = _polynomial_features(xs, degree, index_cache)
-    W = torch.randn(batch_size, d_feat, d_output, device=device) / (d_feat ** 0.5)
-    ys = torch.bmm(phi, W)
-    if noise_std > 0:
-        ys = ys + torch.randn_like(ys) * noise_std
-    if normalize_output:
-        ys_std = ys.std(dim=1, keepdim=True).clamp(min=1e-8)
-        ys = ys / ys_std
-    return xs.cpu(), ys.cpu()
 
 
 @pydra.main(GenConfig)
@@ -69,19 +47,10 @@ def main(config: GenConfig):
     task = build_task(config.task)
     d_in = task.d_in
     d_out = task.d_out
-    degree = getattr(config.task, "degree", 1)
-    noise_std = config.task.noise_std
-    d_feat = task.d_feat if hasattr(task, "d_feat") else d_in
-    input_range = getattr(config.task, "input_range", "gaussian")
-    _norm_raw = getattr(config.task, "normalize_output", False)
-    normalize_output = _norm_raw if isinstance(_norm_raw, bool) else str(_norm_raw).lower() == "true"
     n_train = config.num_examples + 1
     n_eval = config.eval_num_examples + 1
 
-    device = torch.device(config.device if torch.cuda.is_available() else "cpu")
-
-    print(f"Task: {config.task.type} (d_in={d_in}, d_out={d_out}, degree={degree}, input_range={input_range}, normalize_output={normalize_output})")
-    print(f"Device: {device}")
+    print(f"Task: {config.task.type} (d_in={d_in}, d_out={d_out})")
     print(f"Training: {config.num_train_batches} batches x {config.batch_size} x {n_train}")
     print(f"Eval:     {config.num_eval_batches} batches x {config.batch_size} x {n_eval}")
 
@@ -91,30 +60,15 @@ def main(config: GenConfig):
     total_gb = (train_bytes + eval_bytes) / 1e9
     print(f"Estimated size: {total_gb:.2f} GB")
 
-    # Build index cache on device for GPU-accelerated feature expansion
-    if config.task.type == "polynomial":
-        index_cache = [idx.to(device) for idx in _build_monomial_indices(d_in, degree)]
-    else:
-        index_cache = None
-
     # Generate training data
     print(f"\nGenerating training data...")
     train_xs = torch.empty(config.num_train_batches, config.batch_size, n_train, d_in)
     train_ys = torch.empty(config.num_train_batches, config.batch_size, n_train, d_out)
 
     for i in tqdm(range(config.num_train_batches), desc="Training batches"):
-        if config.task.type == "polynomial":
-            xs, ys = generate_batch_on_device(
-                d_in, d_out, d_feat, degree, index_cache,
-                config.batch_size, config.num_examples, noise_std, device,
-                input_range=input_range, normalize_output=normalize_output,
-            )
-            train_xs[i] = xs
-            train_ys[i] = ys
-        else:
-            batch = task.sample_batch(config.batch_size, config.num_examples)
-            train_xs[i] = batch.xs
-            train_ys[i] = batch.ys
+        batch = task.sample_batch(config.batch_size, config.num_examples)
+        train_xs[i] = batch.xs
+        train_ys[i] = batch.ys
 
     # Generate eval data
     print(f"Generating eval data...")
@@ -122,17 +76,9 @@ def main(config: GenConfig):
     eval_ys = torch.empty(config.num_eval_batches, config.batch_size, n_eval, d_out)
 
     for i in tqdm(range(config.num_eval_batches), desc="Eval batches"):
-        if config.task.type == "polynomial":
-            xs, ys = generate_batch_on_device(
-                d_in, d_out, d_feat, degree, index_cache,
-                config.batch_size, config.eval_num_examples, noise_std, device,
-            )
-            eval_xs[i] = xs
-            eval_ys[i] = ys
-        else:
-            batch = task.sample_batch(config.batch_size, config.eval_num_examples)
-            eval_xs[i] = batch.xs
-            eval_ys[i] = batch.ys
+        batch = task.sample_batch(config.batch_size, config.eval_num_examples)
+        eval_xs[i] = batch.xs
+        eval_ys[i] = batch.ys
 
     # Save
     output_path = Path(config.output_path)
@@ -149,10 +95,7 @@ def main(config: GenConfig):
             "task_type": config.task.type,
             "d_input": config.task.d_input,
             "d_output": config.task.d_output,
-            "degree": degree,
-            "noise_std": noise_std,
-            "input_range": input_range,
-            "normalize_output": normalize_output,
+            "noise_std": config.task.noise_std,
             "seed": config.seed,
             "num_train_batches": config.num_train_batches,
             "num_eval_batches": config.num_eval_batches,
