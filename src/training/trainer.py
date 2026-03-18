@@ -7,6 +7,31 @@ from src.models.base import SeqModel
 from src.tasks.base import ICLTask
 
 
+def compute_curriculum_examples(
+    step: int,
+    num_examples: int,
+    curriculum_start: int,
+    curriculum_end_step: int,
+) -> int:
+    """Linear curriculum: ramp num_examples from curriculum_start to num_examples
+    over the first curriculum_end_step steps, then hold at num_examples.
+
+    Args:
+        step: current training step (1-indexed).
+        num_examples: final (maximum) number of examples.
+        curriculum_start: initial number of examples at step 1.
+        curriculum_end_step: step at which ramp completes.
+
+    Returns:
+        Number of examples to use at this step.
+    """
+    if step >= curriculum_end_step:
+        return num_examples
+    frac = (step - 1) / max(1, curriculum_end_step - 1)
+    n = curriculum_start + int(frac * (num_examples - curriculum_start))
+    return min(num_examples, max(curriculum_start, n))
+
+
 class Trainer:
     """Minimal training loop for ICL models."""
 
@@ -55,12 +80,22 @@ class Trainer:
         for step in range(1, cfg.num_steps + 1):
             self.step = step
 
+            # Determine current num_examples (curriculum or fixed)
+            if getattr(cfg, "curriculum", False):
+                end_step = cfg.curriculum_end_step if cfg.curriculum_end_step > 0 else cfg.num_steps // 2
+                current_examples = compute_curriculum_examples(
+                    step, cfg.num_examples, cfg.curriculum_start, end_step
+                )
+            else:
+                current_examples = cfg.num_examples
+
             if self._dataset is not None:
+                # Dataset mode: fixed context length, curriculum is ignored
                 xs = self._dataset[0][self._dataset_idx]
                 ys = self._dataset[1][self._dataset_idx]
                 self._dataset_idx = (self._dataset_idx + 1) % self._dataset[0].shape[0]
             else:
-                batch = self.task.sample_batch(cfg.batch_size, cfg.num_examples)
+                batch = self.task.sample_batch(cfg.batch_size, current_examples)
                 xs = batch.xs.to(self.device)
                 ys = batch.ys.to(self.device)
 

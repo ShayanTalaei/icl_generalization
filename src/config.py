@@ -14,6 +14,7 @@ class AttentionalBiasConfig(pydra.Config):
     def __init__(self):
         super().__init__()
         self.type = "dot_product"   # dot_product | l2
+        self.clip_error = 0.0       # clip L2 error signal norm (0 = off)
 
 
 class RetentionGateConfig(pydra.Config):
@@ -90,6 +91,7 @@ class TaskConfig(pydra.Config):
         self.d_output = 1
         self.noise_std = 0.0
         self.degree = 2               # polynomial degree (polynomial task only)
+        self.max_degree = 11          # Chebyshev max degree (chebyshev task only)
         self.input_range = "gaussian"   # "gaussian" (N(0,I)) | "uniform" (U(-1,1))
         self.normalize_output = ""      # "" (off) | "constant" (fixed scale per degree) | "per_sequence" (unit variance per seq)
 
@@ -108,12 +110,22 @@ class TrainingConfig(pydra.Config):
         self.checkpoint_every = 0     # 0 = disabled
         self.checkpoint_dir = "checkpoints"
         self.dataset_path = ""          # path to pre-generated .pt dataset (empty = online generation)
+        self.curriculum = False         # enable curriculum learning (linearly ramp num_examples)
+        self.curriculum_start = 10      # starting num_examples at step 1
+        self.curriculum_end_step = 0    # step at which ramp completes; 0 = num_steps // 2
 
 
 def build_task(config):
     """Construct a task from a TaskConfig."""
     from src.tasks import TASK_REGISTRY
     task_cls = TASK_REGISTRY[config.type]
+    if config.type == "chebyshev":
+        return task_cls(
+            max_degree=getattr(config, "max_degree", 11),
+            noise_std=config.noise_std,
+            # Only "constant" enables normalization; any other non-empty string is ignored.
+            normalize_output=getattr(config, "normalize_output", "") == "constant",
+        )
     kwargs = dict(
         d_input=config.d_input,
         d_output=config.d_output,

@@ -89,7 +89,9 @@ def build_miras_model(config, d_in: int, d_out: int) -> MIRASModel:
 
     layers = []
     for _ in range(n_layers):
-        bias = BIAS_REGISTRY[config.bias.type]()
+        clip_error = getattr(config.bias, "clip_error", 0.0)
+        bias = BIAS_REGISTRY[config.bias.type](**({
+            "clip_error": clip_error} if config.bias.type == "l2" else {}))
         retention = RETENTION_REGISTRY[config.retention.type]()
         algorithm = ALGORITHM_REGISTRY[config.algorithm.type]()
         memory = _build_memory(config.memory, d_k, d_v)
